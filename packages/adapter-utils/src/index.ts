@@ -60,6 +60,10 @@ export {
   REDACTED_COMMAND_TEXT_VALUE,
   redactCommandText,
 } from "./command-redaction.js";
+export {
+  INHERITED_GITHUB_TOKEN_ENV_KEYS,
+  stripInheritedGithubTokens,
+} from "./env-redaction.js";
 export { buildSandboxNpmInstallCommand } from "./sandbox-install-command.js";
 export { inferOpenAiCompatibleBiller } from "./billing.js";
 // Keep the root adapter-utils entry browser-safe because the UI imports it.

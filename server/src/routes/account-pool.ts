@@ -24,6 +24,7 @@ import {
   getDefaultAccountHealth,
   readPoolAccountHealth,
   setAccountRotationEnabled,
+  setActiveAccount,
   setDefaultRotationEnabled,
   setStopSwitch,
 } from "../services/account-pool.js";
@@ -455,6 +456,57 @@ export function accountPoolRoutes(db: Db) {
     // If we just disabled the currently-active account, rebalance immediately so
     // Active moves off it onto the best remaining in-rotation account.
     await accountPoolBalancer(db).runForCompany(companyId, provider).catch(() => undefined);
+
+    res.json(await buildAccountList(companyId, provider));
+  });
+
+  // POST /api/account-pool/:id/activate — manually pin the active account for a
+  // provider, and engage the STOP switch so the Balancer doesn't rotate away from
+  // the manual pick. Useful when health is unavailable (e.g. usage API 429 masks
+  // the real % and pickBestAccount would skip the account). `__default__` pins the
+  // on-disk default (activeAccountId=null). Release STOP to resume auto-rotation.
+  router.post("/account-pool/:id/activate", async (req, res) => {
+    const companyId = requireCompanyId(req);
+    const id = req.params.id as string;
+    const provider = readProvider(req);
+    const current = await readState(companyId, provider);
+    const prevAccountId = current?.activeAccountId ?? null;
+
+    if (id === DEFAULT_ACCOUNT_ID) {
+      await setActiveAccount(db, { companyId, provider, activeAccountId: null, prevAccountId, reason: "manual" });
+    } else {
+      const existing = await svc.getById(id);
+      const acctProvider = existing ? poolProviderFromType(poolTypeOf(existing.providerMetadata)) : null;
+      if (!existing || existing.companyId !== companyId || existing.status === "deleted" || acctProvider !== provider) {
+        res.status(404).json({ error: "Pool account not found for this provider" });
+        return;
+      }
+      await setActiveAccount(db, { companyId, provider, activeAccountId: id, prevAccountId, reason: "manual" });
+    }
+    // Pin: stop auto-rotation so the manual pick sticks (it may be unrankable when
+    // the usage API 429s). Operator releases the STOP switch to resume rotation.
+    await setStopSwitch(db, { companyId, provider, stopped: true, reason: "manual activate" });
+
+    // Global override: this becomes the SINGLE manual pin auto_rotation honors.
+    // Release any prior manual pin on OTHER providers so auto_rotation switches to
+    // THIS pool immediately (even if the other pool was active/healthier).
+    for (const other of POOL_PROVIDERS) {
+      if (other === provider) continue;
+      const otherState = await readState(companyId, other);
+      if (otherState?.rotationStopped && otherState.reason === "manual") {
+        await setStopSwitch(db, { companyId, provider: other, stopped: false });
+      }
+    }
+
+    await logActivity(db, {
+      companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "account_pool.manual_activate",
+      entityType: id === DEFAULT_ACCOUNT_ID ? "account_pool_state" : "secret",
+      entityId: id === DEFAULT_ACCOUNT_ID ? companyId : id,
+      details: { provider, prevAccountId },
+    });
 
     res.json(await buildAccountList(companyId, provider));
   });

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inferOpenAiCompatibleBiller, type AdapterExecutionContext, type AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import { inferOpenAiCompatibleBiller, stripInheritedGithubTokens, type AdapterExecutionContext, type AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import {
   adapterExecutionTargetIsRemote,
   adapterExecutionTargetRemoteCwd,
@@ -540,8 +540,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       Object.assign(env, paperclipBridge.env);
     }
   }
+  // Strip any global GITHUB_TOKEN/GH_TOKEN inherited from the server process so a
+  // company's agent never authenticates with cross-company GitHub access. The
+  // company's own token (when configured) arrives via `env` (run config).
   const effectiveEnv = Object.fromEntries(
-    Object.entries({ ...process.env, ...env }).filter(
+    Object.entries({ ...stripInheritedGithubTokens({ ...process.env }), ...env }).filter(
       (entry): entry is [string, string] => typeof entry[1] === "string",
     ),
   );

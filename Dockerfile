@@ -54,6 +54,34 @@ RUN pnpm --filter @paperclipai/plugin-sdk build
 RUN pnpm --filter @paperclipai/server build
 RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
 
+# ---------------------------------------------------------------------------
+# Playwright browser binaries — own stage so the slow (~100MB+, yauzl-bound)
+# Chromium download is keyed on the dependency graph (`deps`), NOT on app source.
+# Previously this ran in the production stage AFTER `COPY --from=build /app /app`,
+# so every server/ui code edit busted its cache and re-downloaded Chromium — the
+# main reason ordinary builds were slow. Now a code-only change reuses this layer.
+#
+# Success = full Chromium (chrome-linux64), which always downloads cleanly. The
+# headless-shell variant sometimes gets CDN-throttled; it's optional (full
+# Chromium runs headless via --headless=new) so a missing shell never fails here.
+# ---------------------------------------------------------------------------
+FROM deps AS browsers
+ARG PLAYWRIGHT_INSTALL_TIMEOUT=900
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN cd /app \
+  && { for i in $(seq 1 3); do \
+       timeout "$PLAYWRIGHT_INSTALL_TIMEOUT" ./node_modules/.bin/playwright install chromium && break; \
+       ls -d /ms-playwright/chromium-*/chrome-linux64 >/dev/null 2>&1 && { echo "== da co Chromium day du -> dung som =="; break; }; \
+       echo "== playwright retry $i (chua co Chromium day du, thu lai) =="; \
+       sleep 3; \
+     done; } \
+  && if ls -d /ms-playwright/chromium-*/chrome-linux64 >/dev/null 2>&1; then \
+       echo "OK: Chromium day du da co (headless-shell la tuy chon)."; \
+       chmod -R a+rx /ms-playwright; \
+     else \
+       echo "LOI: thieu Chromium day du - build that bai."; exit 1; \
+     fi
+
 FROM base AS production
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -90,37 +118,19 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 COPY --chown=node:node --from=build /app /app
 
-# Playwright browsers are only needed for browser QA/screenshot scripts, not
-# normal server runtime. Keep production builds fast unless explicitly requested.
-#
-# Tách làm 2 phần để build không chết oan vì 1 component CDN hỏng:
-#   1. install-deps  -> chỉ cài thư viện hệ thống qua apt (nhanh, ổn định).
-#   2. install chromium -> tải browser. Lệnh này kéo cả Chromium đầy đủ LẪN
-#      chromium-headless-shell. headless-shell đôi khi bị 1 edge CDN throttle ->
-#      treo. Ta retry vài lần nhưng KHÔNG bắt buộc nó xong.
-#
-# Điều kiện THÀNH CÔNG = có Chromium đầy đủ (chrome-linux64). Cái này luôn tải ngon.
-# headless-shell chỉ là bản rút gọn tối ưu cho headless -> thiếu vẫn QA được bằng
-# Chromium đầy đủ (chế độ --headless=new). Thiếu headless-shell KHÔNG làm build fail.
+# Chromium's RUNTIME system libraries (apt). The browser BINARIES themselves are
+# copied (cached) from the `browsers` stage below — they are NOT re-downloaded per
+# build. `install-deps` is apt-only here, so a code change costs an apt run, not a
+# ~100MB Chromium download.
 RUN if [ "$INSTALL_PLAYWRIGHT" = "true" ]; then \
-    cd /app \
-    && ./node_modules/.bin/playwright install-deps chromium \
-    && { for i in $(seq 1 3); do \
-         timeout "$PLAYWRIGHT_INSTALL_TIMEOUT" ./node_modules/.bin/playwright install chromium && break; \
-         ls -d /ms-playwright/chromium-*/chrome-linux64 >/dev/null 2>&1 && { echo "== da co Chromium day du -> bo qua headless-shell, dung som =="; break; }; \
-         echo "== playwright retry $i (chua co Chromium day du, thu lai) =="; \
-         sleep 3; \
-       done; } \
-    && if ls -d /ms-playwright/chromium-*/chrome-linux64 >/dev/null 2>&1; then \
-         echo "OK: Chromium day du da co (headless-shell la tuy chon)."; \
-         chmod -R a+rx /ms-playwright; \
-       else \
-         echo "LOI: thieu Chromium day du - build that bai."; exit 1; \
-       fi; \
-  else \
-    echo "Skipping Playwright browser install. Use --build-arg INSTALL_PLAYWRIGHT=true to include browser QA support."; \
-  fi \
+      cd /app && ./node_modules/.bin/playwright install-deps chromium; \
+    else \
+      echo "Skipping Playwright system deps. Set --build-arg INSTALL_PLAYWRIGHT=true for browser QA."; \
+    fi \
   && rm -rf /var/lib/apt/lists/*
+
+# Cached browser binaries from the `browsers` stage (keyed on deps, not app code).
+COPY --chown=node:node --from=browsers /ms-playwright /ms-playwright
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

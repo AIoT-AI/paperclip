@@ -62,6 +62,23 @@ export interface LogActivityInput {
   details?: Record<string, unknown> | null;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `activity_log.agent_id` and `run_id` are UUID columns. A caller passing a
+ * non-UUID value (e.g. an `X-Paperclip-Run-Id` header that isn't a UUID) would
+ * otherwise blow up the INSERT with `invalid input syntax for type uuid` —
+ * and because logging happens after the primary write (not in the same txn),
+ * that surfaced as a 500 *after* the entity was already created (duplicate rows).
+ * Coerce anything that isn't a valid UUID to null so audit logging can never
+ * break the operation it's recording.
+ */
+function asUuidOrNull(value?: string | null): string | null {
+  if (value && UUID_RE.test(value)) return value;
+  if (value) logger.warn({ value }, "activity-log: dropping non-UUID id (stored null)");
+  return null;
+}
+
 export async function logActivity(db: Db, input: LogActivityInput) {
   const currentUserRedactionOptions = {
     enabled: (await instanceSettingsService(db).getGeneral()).censorUsernameInLogs,
@@ -70,6 +87,8 @@ export async function logActivity(db: Db, input: LogActivityInput) {
   const redactedDetails = sanitizedDetails
     ? redactCurrentUserValue(sanitizedDetails, currentUserRedactionOptions)
     : null;
+  const agentId = asUuidOrNull(input.agentId);
+  const runId = asUuidOrNull(input.runId);
   await db.insert(activityLog).values({
     companyId: input.companyId,
     actorType: input.actorType,
@@ -77,8 +96,8 @@ export async function logActivity(db: Db, input: LogActivityInput) {
     action: input.action,
     entityType: input.entityType,
     entityId: input.entityId,
-    agentId: input.agentId ?? null,
-    runId: input.runId ?? null,
+    agentId,
+    runId,
     details: redactedDetails,
   });
 
@@ -91,8 +110,8 @@ export async function logActivity(db: Db, input: LogActivityInput) {
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId,
-      agentId: input.agentId ?? null,
-      runId: input.runId ?? null,
+      agentId,
+      runId,
       details: redactedDetails,
     },
   });
@@ -110,8 +129,8 @@ export async function logActivity(db: Db, input: LogActivityInput) {
       companyId: input.companyId,
       payload: {
         ...redactedDetails,
-        agentId: input.agentId ?? null,
-        runId: input.runId ?? null,
+        agentId,
+        runId,
       },
     };
     publishPluginDomainEvent(event);
