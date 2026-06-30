@@ -671,6 +671,8 @@ export type {
   AddPoolAccountRequest,
   OauthStartResponse,
   OauthCompleteRequest,
+  GithubCredentialMetadata,
+  GithubCredentialStatus,
 } from "./types/index.js";
 export {
   COMPANY_SEARCH_SCOPES,
@@ -678,6 +680,8 @@ export {
   POOL_ACCOUNT_TYPES,
   POOL_PROVIDERS,
   poolProviderFromType,
+  GITHUB_CREDENTIAL_SECRET_TYPE,
+  GITHUB_CREDENTIAL_SECRET_NAME,
 } from "./types/index.js";
 export {
   ISSUE_REFERENCE_IDENTIFIER_RE,

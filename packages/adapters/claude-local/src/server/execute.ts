@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import { stripInheritedGithubTokens } from "@paperclipai/adapter-utils";
 import type { RunProcessResult } from "@paperclipai/adapter-utils/server-utils";
 import {
   adapterExecutionTargetIsRemote,
@@ -283,8 +284,11 @@ async function buildClaudeRuntimeConfig(input: ClaudeExecutionInput): Promise<Cl
     env.PAPERCLIP_API_KEY = authToken;
   }
 
+  // Strip any global GITHUB_TOKEN/GH_TOKEN inherited from the server process so a
+  // company's agent never authenticates with cross-company GitHub access. The
+  // company's own token (when configured) arrives via `env` (run config) below.
   const runtimeEnv = Object.fromEntries(
-    Object.entries(ensurePathInEnv({ ...process.env, ...env })).filter(
+    Object.entries(ensurePathInEnv({ ...stripInheritedGithubTokens({ ...process.env }), ...env })).filter(
       (entry): entry is [string, string] => typeof entry[1] === "string",
     ),
   );

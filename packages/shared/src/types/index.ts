@@ -389,6 +389,14 @@ export type {
   OauthStartResponse,
   OauthCompleteRequest,
 } from "./account-pool.js";
+export {
+  GITHUB_CREDENTIAL_SECRET_TYPE,
+  GITHUB_CREDENTIAL_SECRET_NAME,
+} from "./github-credentials.js";
+export type {
+  GithubCredentialMetadata,
+  GithubCredentialStatus,
+} from "./github-credentials.js";
 export type {
   CompanyPortabilityInclude,
   CompanyPortabilityEnvInput,

@@ -54,4 +54,11 @@ export const accountPoolApi = {
       `/account-pool/${encodeURIComponent(id)}/rotation?${qs(companyId, provider)}`,
       { enabled },
     ),
+  // Manually pin the active account for a provider (+ engages STOP so the balancer
+  // keeps it). Use when health is unavailable (e.g. usage API 429) and auto-pick can't.
+  activate: (companyId: string, id: string, provider: PoolProvider) =>
+    api.post<AccountPoolListResponse>(
+      `/account-pool/${encodeURIComponent(id)}/activate?${qs(companyId, provider)}`,
+      {},
+    ),
 };

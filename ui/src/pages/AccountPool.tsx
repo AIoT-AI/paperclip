@@ -124,6 +124,9 @@ function AccountCard(props: {
   rotationToggleLabel?: string;
   /** optional one-line clarifier shown under the checkbox */
   rotationToggleHint?: string;
+  /** manually pin this account as the provider's active account (+ engages STOP) */
+  onActivate: (account: AccountWithHealth) => void;
+  activateDisabled: boolean;
 }) {
   const {
     account,
@@ -136,6 +139,8 @@ function AccountCard(props: {
     rotationToggleDisabled,
     rotationToggleLabel = "Include in auto-rotation",
     rotationToggleHint,
+    onActivate,
+    activateDisabled,
   } = props;
   const windows = uniqueWindows(account.windows);
   const rotationEnabled = account.rotationEnabled !== false;
@@ -216,6 +221,22 @@ function AccountCard(props: {
           </p>
         ) : null}
       </div>
+
+      {/* Manual pin: force this account active (engages STOP so the Balancer keeps
+          it — handy when health is unavailable, e.g. usage API 429). */}
+      {!isActive ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-fit"
+          onClick={() => onActivate(account)}
+          disabled={activateDisabled}
+          title="Pin this account as active for the provider (stops auto-rotation until released)"
+        >
+          <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+          Set active
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -401,6 +422,27 @@ export function AccountPool() {
     },
   });
 
+  const activateMutation = useMutation({
+    mutationFn: (id: string) => accountPoolApi.activate(selectedCompanyId!, id, provider),
+    onSuccess: (data) => {
+      if (selectedCompanyId) {
+        queryClient.setQueryData([...queryKeys.accountPool.list(selectedCompanyId), provider], data);
+      }
+      pushToast({
+        title: "Active account set",
+        body: "Rotation STOPPED on this provider to pin it — release the STOP switch to resume auto-rotation.",
+        tone: "success",
+      });
+    },
+    onError: (error) => {
+      pushToast({
+        title: "Failed to set active account",
+        body: error instanceof ApiError ? error.message : undefined,
+        tone: "error",
+      });
+    },
+  });
+
   const data = poolQuery.data;
   // The server prepends the implicit "Default — this machine" card (id
   // DEFAULT_ACCOUNT_ID) to accounts. Pooled accounts follow.
@@ -569,6 +611,8 @@ export function AccountPool() {
                   }
                   onToggleRotation={(acc, enabled) => rotationMutation.mutate({ id: acc.id, enabled })}
                   rotationToggleDisabled={rotationMutation.isPending}
+                  onActivate={(acc) => activateMutation.mutate(acc.id)}
+                  activateDisabled={activateMutation.isPending}
                 />
               );
             })}

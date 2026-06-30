@@ -83,11 +83,31 @@ async function ensureSymlink(target: string, source: string): Promise<void> {
   await createExpectedSymlink(target, source);
 }
 
-async function ensureCopiedFile(target: string, source: string): Promise<void> {
+/**
+ * Copy a non-credential seed file (config.toml/config.json/instructions.md) into
+ * a Codex home, copy-once. These are best-effort seeds — Codex runs with defaults
+ * if they are absent — so a copy failure (e.g. EACCES when the shared source file
+ * was written by root with mode 0600 while the adapter runs as `node`) must NOT
+ * abort the whole run with `adapter_failed`. Warn and skip instead.
+ */
+async function ensureCopiedFile(
+  target: string,
+  source: string,
+  onWarn?: (message: string) => void,
+): Promise<void> {
   const existing = await fs.lstat(target).catch(() => null);
   if (existing) return;
-  await ensureParentDir(target);
-  await fs.copyFile(source, target);
+  try {
+    await ensureParentDir(target);
+    await fs.copyFile(source, target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "";
+    const warn =
+      `[paperclip] Skipped seeding Codex config "${path.basename(source)}" into ` +
+      `"${path.dirname(target)}" (${code || "copy failed"}): ${(error as Error).message}. ` +
+      `Codex will use defaults. If the source is root-owned with mode 0600, chown it to the run user.`;
+    (onWarn ?? ((m) => console.warn(m)))(warn);
+  }
 }
 
 /**
@@ -193,7 +213,7 @@ export async function prepareManagedCodexHome(
     for (const name of COPIED_SHARED_FILES) {
       const source = path.join(sourceHome, name);
       if (!(await pathExists(source))) continue;
-      await ensureCopiedFile(path.join(targetHome, name), source);
+      await ensureCopiedFile(path.join(targetHome, name), source, (m) => void onLog("stdout", `${m}\n`));
     }
 
     await onLog(

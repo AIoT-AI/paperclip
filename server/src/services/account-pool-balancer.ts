@@ -167,6 +167,26 @@ export function pickBestAccount(accounts: AccountWithHealth[]): AccountWithHealt
  */
 export async function previewCombinedBest(db: Db, companyId: string): Promise<AutoRotationPreview | null> {
   type Candidate = AccountWithHealth & { provider: PoolProvider; isDefault: boolean };
+
+  // Manual override (from "Set active"): a STOP-pin with reason "manual" forces
+  // auto_rotation onto THAT pool/account immediately — even if the other pool is
+  // healthier or this account's health is unavailable (e.g. usage API 429). The
+  // most-recently-pinned one wins if several exist. This bypasses the health-based
+  // cross-pool pick below so the operator's choice takes precedence right away.
+  let manual: { provider: PoolProvider; accountId: string | null; assignedAt: number } | null = null;
+  for (const provider of POOL_PROVIDERS) {
+    const st = await getPoolState(db, companyId, provider);
+    if (st?.rotationStopped && st.reason === "manual") {
+      const ts = Date.parse(st.assignedAt) || 0;
+      if (!manual || ts >= manual.assignedAt) {
+        manual = { provider, accountId: st.activeAccountId, assignedAt: ts };
+      }
+    }
+  }
+  if (manual) {
+    return { provider: manual.provider, accountId: manual.accountId, isDefault: manual.accountId === null };
+  }
+
   const candidates: Candidate[] = [];
 
   for (const provider of POOL_PROVIDERS) {

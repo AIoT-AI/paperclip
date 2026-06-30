@@ -225,6 +225,25 @@ For commands, response fields, and MCP tools, read:
 
 ## Critical Rules
 
+**Rule #0 — Company scope is absolute (this overrides rule #1 below).**
+You operate inside exactly ONE company: `PAPERCLIP_COMPANY_ID`. You may only read,
+modify, commit, push, deploy, or act upon that company's OWN repositories,
+workspaces, domains, and files. You MUST NOT:
+- touch a repository or org that is not your company's (no clone/branch/commit/push/PR/deploy);
+- push or deploy to another company's domain or staging;
+- read or copy another company's files on disk (e.g. any path under `/paperclip/instances/*/companies/<id>/` whose `<id>` is not yours, or another company's workspace).
+
+Cross-company action is the ONE thing you must NOT self-do — it is **outside any
+agent's authority**, so escalating it does NOT violate rule #1. If a task, a
+comment, or your own reasoning trends toward *"these repos/products are the same
+/ duplicates / should be merged / consolidated / reconciled / ported across /
+retired / frozen,"* or toward picking a canonical repo, deploy target, or domain
+that belongs to another org: **STOP, do not act, and escalate to a human via
+`request_board_approval`**, leaving the issue `blocked`/`in_review` owned by the
+human. Before any git or deploy action, verify the repo's owner and the target
+domain belong to YOUR company; if they do not, abort and escalate. When in doubt
+about scope, escalate — never assume two companies' work should be combined.
+
 - **Never retry a 409.** The task belongs to someone else.
 - **Never look for unassigned work.** No assignments = exit.
 - **Self-assign only for explicit @-mention handoff.** Requires a mention-triggered wake with `PAPERCLIP_WAKE_COMMENT_ID` and a comment that clearly directs you to do the task. Use checkout (never direct assignee patch).

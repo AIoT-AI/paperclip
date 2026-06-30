@@ -69,6 +69,18 @@ A functional UI is not a finished UI. If the layout looks unstyled, cramped, mis
 
 If a screen looks like raw HTML, call it out and fix it - don't ship it because the flow is correct.
 
+## Mockup deliverable = something the board can OPEN
+
+When a task asks for a mockup or a design-phase visual (e.g. "mockup screens", "UI flow", "what will this look like"), the deliverable is a **viewable screen, not a prose description**. A markdown document of "UI flow: user clicks X, sees Y" is a spec, not a mockup - it does not satisfy a mockup ask.
+
+Produce a clickable mockup the board opens in a browser:
+
+1. **Build standalone HTML/CSS mockup screens** in the repo (e.g. `mockup/<TICKET>/<screen>.html`), styled with the product's design tokens - not unstyled defaults. Cover the key screens of the flow and link them so the reviewer can click through. Use realistic synthetic data. Make them responsive at desktop (1440x900) and mobile (390x844).
+2. **Serve them at a Paperclip preview URL.** Start a managed runtime service that serves the mockup directory (see the `issue-workspaces` reference - `runtime-services/start`), then read `runtimeServices[].url`. Do not boot ad-hoc background servers.
+3. **Hand off the URL + screenshots.** Post the preview URL as a work product and attach desktop + mobile screenshots of each screen in the comment. This is the Visual-truth gate for a mockup: if the board can't click it or see it, it isn't delivered - keep the ticket `in_review`/`blocked`, never `done`.
+
+Prefer fast throwaway HTML mockups at the design phase (no real data wiring); reserve real in-app screens for the build phase.
+
 ## Reach for what exists first
 
 We have a design system. Before proposing anything new:

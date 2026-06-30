@@ -18,10 +18,11 @@ import { createHash, randomBytes } from "node:crypto";
 export const CLAUDE_OAUTH = {
   clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
   authorizeUrl: "https://claude.ai/oauth/authorize",
-  // primary token endpoint; some deployments use /api/oauth/token — exchange()
-  // falls back to it on a network/404 failure.
-  tokenUrl: "https://console.anthropic.com/v1/oauth/token",
-  tokenUrlFallback: "https://console.anthropic.com/api/oauth/token",
+  // Token endpoint moved off console.anthropic.com (now 404s). Verified live
+  // (returns 400 invalid_grant on a bad code) at api.anthropic.com, with claude.ai
+  // as a fallback. exchange() falls back on a network/404 failure.
+  tokenUrl: "https://api.anthropic.com/v1/oauth/token",
+  tokenUrlFallback: "https://claude.ai/v1/oauth/token",
   redirectUri: "https://console.anthropic.com/oauth/code/callback",
   scopes: "org:create_api_key user:profile user:inference",
 } as const;

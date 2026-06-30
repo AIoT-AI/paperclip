@@ -79,6 +79,11 @@ import {
   listPoolAccounts,
 } from "./account-pool.js";
 import { accountPoolBalancer, previewCombinedBest } from "./account-pool-balancer.js";
+import {
+  resolveCompanyGithubToken,
+  resolveCompanyAllowedRepos,
+  isRepoAllowed,
+} from "./github-credentials.js";
 import { resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
 import {
   buildHeartbeatRunIssueComment,
@@ -824,7 +829,22 @@ function deriveRepoNameFromRepoUrl(repoUrl: string | null): string | null {
   }
 }
 
+/** Embed the company GitHub token into an https clone URL; ssh/scp URLs are left as-is. */
+function buildAuthenticatedGitHubCloneUrl(repoUrl: string, token: string | null): string {
+  if (!token) return repoUrl;
+  try {
+    const url = new URL(repoUrl);
+    if (url.protocol !== "https:") return repoUrl;
+    url.username = "x-access-token";
+    url.password = token;
+    return url.toString();
+  } catch {
+    return repoUrl;
+  }
+}
+
 async function ensureManagedProjectWorkspace(input: {
+  db: Db;
   companyId: string;
   projectId: string;
   repoUrl: string | null;
@@ -842,6 +862,16 @@ async function ensureManagedProjectWorkspace(input: {
       await fs.mkdir(cwd, { recursive: true });
     }
     return { cwd, warning: null };
+  }
+
+  // Cross-company guard: only clone repos that belong to this company (owners of
+  // its registered project_workspaces, or its explicit allowlist). Blocks an
+  // agent from pulling another company's repo into a managed checkout.
+  const allow = await resolveCompanyAllowedRepos(input.db, input.companyId);
+  if (!isRepoAllowed(input.repoUrl, allow)) {
+    throw new Error(
+      `Repository "${input.repoUrl}" is not in this company's allowed repos — refusing managed clone (cross-company guard).`,
+    );
   }
 
   const gitDirExists = await fs
@@ -863,14 +893,19 @@ async function ensureManagedProjectWorkspace(input: {
     await fs.rm(cwd, { recursive: true, force: true });
   }
 
+  // Clone with the company's own GitHub token (the global token is stripped from
+  // the exec env by sanitizeRuntimeServiceBaseEnv).
+  const companyToken = await resolveCompanyGithubToken(input.db, input.companyId).catch(() => null);
+  const cloneUrl = buildAuthenticatedGitHubCloneUrl(input.repoUrl, companyToken);
   try {
-    await execFile("git", ["clone", input.repoUrl, cwd], {
+    await execFile("git", ["clone", cloneUrl, cwd], {
       env: sanitizeRuntimeServiceBaseEnv(process.env),
       timeout: MANAGED_WORKSPACE_GIT_CLONE_TIMEOUT_MS,
     });
     return { cwd, warning: null };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
+    // Use the clean repoUrl in the error (never the token-bearing clone URL).
     throw new Error(`Failed to prepare managed checkout for "${input.repoUrl}" at "${cwd}": ${reason}`);
   }
 }
@@ -3774,6 +3809,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         if (!projectCwd || projectCwd === REPO_ONLY_CWD_SENTINEL) {
           try {
             const managedWorkspace = await ensureManagedProjectWorkspace({
+              db,
               companyId: agent.companyId,
               projectId: workspaceProjectId ?? resolvedProjectId ?? workspace.projectId,
               repoUrl: readNonEmptyString(workspace.repoUrl),
@@ -3846,6 +3882,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
 
     if (workspaceProjectId) {
       const managedWorkspace = await ensureManagedProjectWorkspace({
+        db,
         companyId: agent.companyId,
         projectId: workspaceProjectId,
         repoUrl: null,
@@ -7412,6 +7449,19 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       routineEnv: routineEnvContext.env,
       secretsSvc,
     });
+    // Per-company GitHub access: inject ONLY this company's own token (the global
+    // GITHUB_TOKEN is stripped from every agent env). When the company has no
+    // credential configured, inject nothing — the agent simply has no GitHub
+    // access. This closes the cross-company leak where one company's agents could
+    // push into another company's repos.
+    const companyGithubToken = await resolveCompanyGithubToken(db, agent.companyId).catch(() => null);
+    if (companyGithubToken) {
+      resolvedConfig.env = {
+        ...parseObject(resolvedConfig.env),
+        GITHUB_TOKEN: companyGithubToken,
+        GH_TOKEN: companyGithubToken,
+      };
+    }
     if (secretManifest.length > 0) {
       context.paperclipSecrets = {
         manifest: secretManifest,

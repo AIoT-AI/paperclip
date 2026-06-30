@@ -16,8 +16,15 @@ export function resolveRawGitHubUrl(hostname: string, owner: string, repo: strin
     : `https://${hostname}/raw/${owner}/${repo}/${ref}/${p}`;
 }
 
-export async function ghFetch(url: string, init?: RequestInit): Promise<Response> {
-  const token = process.env.GITHUB_TOKEN;
+export async function ghFetch(
+  url: string,
+  init?: RequestInit,
+  opts?: { token?: string | null },
+): Promise<Response> {
+  // Prefer an explicitly-provided (per-company) token; otherwise fall back to the
+  // server's global read token. Agent runs never see the global token (it is
+  // stripped from their env) — this server-side read path is separate.
+  const token = opts?.token ?? process.env.GITHUB_TOKEN;
   try {
     return await fetch(url, {
       ...init,
